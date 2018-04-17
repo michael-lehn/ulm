@@ -1,0 +1,880 @@
+#define __STDC_FORMAT_MACROS
+#include <algorithm>
+#include <cstring>
+#include <cinttypes>
+#include <iostream>
+#include <cassert>
+#include <cstdio>
+#include <fstream>
+#include <sstream>
+#include <unordered_map>
+#include <queue>
+#include <vector>
+
+#include <iostream>
+
+struct RAM
+{
+    char
+    operator()(uint64_t address) const
+    {
+        return data[address];
+    }
+
+    char &
+    operator()(uint64_t address)
+    {
+        return data[address];
+    }
+
+    void
+    print(uint64_t fromAddr, uint64_t toAddr) const
+    {
+        for (uint64_t from=fromAddr;
+             from<toAddr;
+             (from+40>from) ? from+=40 : from=toAddr)
+        {
+            uint64_t to = (from+40>from) ? std::min(from+40, toAddr)
+                                         : toAddr;
+
+            for (uint64_t i=from; i<=to && (i-1<i || from==0); ++i) {
+                std::printf("---");
+            }
+            std::printf("\n");
+            for (uint64_t i=from; i<=to && (i-1<i || from==0); ++i) {
+                std::printf("%02x ", 0xFF & data[i]);
+            }
+            std::printf("\n");
+            for (uint64_t i=from; i<=to && (i-1<i || from==0); ++i) {
+                std::printf("---");
+            }
+            std::printf("\n");
+            for (uint64_t i=from; i<=to && (i-1<i || from==0); ++i) {
+                if (i % 8 == 0) {
+                    std::printf("|%-23" PRIu64, i);
+                }
+            }
+            std::printf("\n");
+            for (uint64_t i=from; i<=to && (i-1<i || from==0); ++i) {
+                if (i % 8 == 0) {
+                    std::printf("|0x%-21" PRIx64, i);
+                }
+            }
+            std::printf("\n\n");
+        }
+    }
+
+    mutable std::unordered_map<uint64_t,char>  data;
+};
+
+struct CpuRegister
+{
+    CpuRegister()
+        : zero(0)
+    {
+        r[3] = 160;
+    }
+
+
+    const uint64_t &
+    operator()(unsigned char id) const
+    {
+        zero = 0;
+        if (id==0) {
+            return zero;
+        }
+        return r[id];
+    }
+
+    uint64_t &
+    operator()(unsigned char id)
+    {
+        zero = 0;
+        return (id!=0) ? r[id] : zero;
+    }
+
+    void
+    print(unsigned char     from,
+          unsigned char     to,
+          const std::string &IR_asmCode) const
+    {
+
+        for (unsigned char i=from; i<=to; ++i) {
+            std::printf("Reg%-2d   0x%016" PRIx64, i, operator()(i));
+            if (i==1) {
+                std::printf("  IP: %" PRIu64, r[1]);
+            } else if (i==2) {
+                std::printf("  IR: %-s", IR_asmCode.c_str());
+            }
+            std::printf("\n");
+        }
+        std::printf("\n\n");
+    }
+
+    uint64_t  r[256];
+    mutable uint64_t  zero;
+};
+
+struct IO
+{
+    char
+    get()
+    {
+        std::printf("Input one character: ");
+        char c = getchar();
+        getchar();
+        return c;
+    }
+
+    void
+    put(char c)
+    {
+        output.append(1, c);
+    }
+
+    void
+    print()
+    {
+        std::printf("Terminal:\n");
+        if (output.length()!=0) {
+            std::printf("%s\n\n", output.c_str());
+        }
+    }
+
+    std::string         output;
+};
+
+struct DataBus
+{
+    DataBus(RAM &ram, CpuRegister &cpuRegister, IO &io)
+        : ram(ram), cpuRegister(cpuRegister), io(io)
+    {
+    }
+
+    template <unsigned int bytes, bool asSigned=true>
+    void
+    fetch(uint64_t address, unsigned char reg)
+    {
+        assert(bytes==1 || bytes==2 || bytes==4 || bytes==8);
+        assert(address % bytes == 0);
+
+        cpuRegister(reg) = 0;
+        if (asSigned && (0x80 & ram(address))) {
+            cpuRegister(reg) = -1;
+        }
+        for (unsigned int i=0; i<bytes; ++i) {
+            cpuRegister(reg) = cpuRegister(reg) << 8;
+            cpuRegister(reg) = cpuRegister(reg) | (0xFF & ram(address+i));
+        }
+    }
+
+    template <unsigned int bytes>
+    void
+    store(unsigned char reg, uint64_t address)
+    {
+        assert(bytes==1 || bytes==2 || bytes==4 || bytes==8);
+        assert(address % bytes == 0);
+
+        uint64_t value = cpuRegister(reg);
+        for (unsigned int i=0; i<bytes; ++i) {
+            char byte      = value & 0xFF;
+            ram(address+bytes-i-1) = byte;
+            value = value >> 8;
+        }
+    }
+
+    template <unsigned int bytes>
+    void
+    store(uint64_t value, uint64_t address)
+    {
+        assert(bytes==1 || bytes==2 || bytes==4 || bytes==8);
+        assert(address % bytes == 0);
+
+        for (unsigned int i=0; i<bytes; ++i) {
+            char byte      = value & 0xFF;
+            ram(address+bytes-i-1) = byte;
+            value = value >> 8;
+        }
+    }
+
+    void
+    get(unsigned char reg)
+    {
+        unsigned char c = io.get();
+        cpuRegister(reg) = c;
+    }
+
+    void
+    put(unsigned char reg)
+    {
+        unsigned char c = (0xFF & cpuRegister(reg));
+        io.put(c);
+    }
+
+    void
+    putc(unsigned char c)
+    {
+        io.put(c);
+    }
+
+
+    RAM         &ram;
+    CpuRegister &cpuRegister;
+    IO          &io;
+};
+
+
+struct ALU
+{
+    ALU(CpuRegister &cpuRegister)
+        : cpuRegister(cpuRegister), zf(0), of(0), sf(0), cf(0)
+    {
+    }
+
+    void
+    setWord(uint16_t valueXY, int regZ)
+    {
+        cpuRegister(regZ) = valueXY;
+    }
+
+    void
+    bitwiseOR(unsigned char regX, unsigned char regY, unsigned char regZ)
+    {
+        uint64_t valueX = cpuRegister(regX);
+        uint64_t valueY = cpuRegister(regY);
+
+        cpuRegister(regZ) = valueX | valueY;
+    }
+
+    void
+    bitwiseOR(uint64_t valueX, unsigned char regY, unsigned char regZ)
+    {
+        uint64_t valueY = cpuRegister(regY);
+
+        cpuRegister(regZ) = valueX | valueY;
+    }
+
+    void
+    bitwiseAND(unsigned char regX, unsigned char regY, unsigned char regZ)
+    {
+        uint64_t valueX = cpuRegister(regX);
+        uint64_t valueY = cpuRegister(regY);
+
+        cpuRegister(regZ) = valueX & valueY;
+    }
+
+    void
+    bitwiseAND(uint64_t valueX, unsigned char regY, unsigned char regZ)
+    {
+        uint64_t valueY = cpuRegister(regY);
+
+        cpuRegister(regZ) = valueX & valueY;
+    }
+
+    void
+    bitwiseSHL(unsigned char regX, unsigned char regY, unsigned char regZ)
+    {
+        uint64_t valueX = cpuRegister(regX);
+        uint64_t valueY = cpuRegister(regY);
+
+        cpuRegister(regZ) = (valueY << valueX);
+    }
+
+    void
+    bitwiseSHL(uint64_t valueX, unsigned char regY, unsigned char regZ)
+    {
+        uint64_t valueY = cpuRegister(regY);
+
+        cpuRegister(regZ) = (valueY << valueX);
+    }
+
+    void
+    bitwiseSHR(unsigned char regX, unsigned char regY, unsigned char regZ)
+    {
+        uint64_t valueX = cpuRegister(regX);
+        uint64_t valueY = cpuRegister(regY);
+
+        cpuRegister(regZ) = (valueY >> valueX);
+    }
+
+    void
+    bitwiseSHR(uint64_t valueX, unsigned char regY, unsigned char regZ)
+    {
+        uint64_t valueY = cpuRegister(regY);
+
+        cpuRegister(regZ) = (valueY >> valueX);
+    }
+
+    void
+    add(unsigned char regX, unsigned char regY, unsigned char regZ)
+    {
+        uint64_t valueX = cpuRegister(regX);
+        uint64_t valueY = cpuRegister(regY);
+        uint64_t valueZ = cpuRegister(regZ);
+
+        zf = of = sf = cf = 0;
+
+        valueZ = valueX + valueY;
+        if ((valueZ < valueX) || (valueZ < valueY)) {
+            cf = 1;
+        }
+        if (valueZ==0) {
+            zf = 1;
+        }
+
+        bool signX = (valueX>>63);
+        bool signY = (valueY>>63);
+        bool signZ = (valueZ>>63);
+
+        if ((signX==signY) && (signX!=signZ)) {
+            of = 1;
+        }
+
+        sf = signZ;
+        cpuRegister(regZ) = valueZ;
+    }
+
+    void
+    add(uint64_t valueX, unsigned char regY, unsigned char regZ)
+    {
+        uint64_t valueY = cpuRegister(regY);
+        uint64_t valueZ = cpuRegister(regZ);
+
+        zf = of = sf = cf = 0;
+
+        valueZ = valueX + valueY;
+        if ((valueZ < valueX) || (valueZ < valueY)) {
+            cf = 1;
+        }
+        if (valueZ==0) {
+            zf = 1;
+        }
+
+        bool signX = (valueX>>63);
+        bool signY = (valueY>>63);
+        bool signZ = (valueZ>>63);
+
+        if ((signX==signY) && (signX!=signZ)) {
+            of = 1;
+        }
+
+        sf = signZ;
+        cpuRegister(regZ) = valueZ;
+    }
+
+    void
+    sub(unsigned char regX, unsigned char regY, unsigned char regZ)
+    {
+        add(-cpuRegister(regX), regY, regZ);
+
+        uint64_t valueX = cpuRegister(regX);
+        uint64_t valueY = cpuRegister(regY);
+        if (valueX>valueY) {
+            cf = 1;
+        } else {
+            cf = 0;
+        }
+    }
+
+    void
+    sub(uint64_t valueX, unsigned char regY, unsigned char regZ)
+    {
+        add(-valueX, regY, regZ);
+
+        uint64_t valueY = cpuRegister(regY);
+        if (valueX>valueY) {
+            cf = 1;
+        } else {
+            cf = 0;
+        }
+    }
+
+    void
+    unsignedMul(unsigned char regX, unsigned char regY, int regZ)
+    {
+        cpuRegister(regZ) = cpuRegister(regX) * cpuRegister(regY);
+    }
+
+    void
+    unsignedMul(uint64_t valueX, unsigned char regY, int regZ)
+    {
+        cpuRegister(regZ) = valueX * cpuRegister(regY);
+    }
+
+    void
+    print()
+    {
+        std::printf("ZF = %1d, OF = %1d, SF = %1d, CF = %1d\n", zf, of, sf, cf);
+    }
+
+    CpuRegister &cpuRegister;
+
+    int         zf, of, sf, cf;
+};
+
+struct CPU
+{
+    CPU(RAM &ram, IO &io)
+        : alu(cpuRegister), dataBus(ram, cpuRegister, io)
+    {
+        cpuRegister(1) = 0;         // Instruction Pointer (IP)
+        cpuRegister(2) = 0;         // Instruction Register (IR)
+        IR_asm         = "halt";
+    }
+
+    void
+    print()
+    {
+        cpuRegister.print(0,15,IR_asm);
+        alu.print();
+    }
+
+    bool
+    cycle()
+    {
+        char asmBuffer[101];
+        bool run = true;
+
+
+        // (A) FETCH
+        dataBus.fetch<4, false>(cpuRegister(1), 2);
+
+        // (B) DECODE
+        uint32_t instruction = cpuRegister(2);
+
+        unsigned char     Z           = instruction       & 0xFF;
+        unsigned char     Y           = (instruction>> 8) & 0xFF;
+        unsigned char     X           = (instruction>>16) & 0xFF;
+        unsigned char     op          = (instruction>>24) & 0xFF;
+
+        signed char Xs = X;
+        signed char Ys = Y;
+        signed char Zs = Z;
+
+        // (C) EXECUTE
+        uint64_t IP_old = cpuRegister(1);
+
+        uint16_t XY = X;
+        XY = (XY<<8) | Y;
+
+        uint32_t XYZ = XY;
+        XYZ = (XYZ<<8) | Z;
+
+        int32_t XYZs = XY;
+        XYZs = (XYZs<<8) | Z;
+
+        XYZs = Zs;
+
+        switch (op) {
+            // halt
+            case 0x00:
+                std::snprintf(asmBuffer, 100, "halt");
+                run = false;
+                break;
+
+            // get
+            case 0x01:
+                std::snprintf(asmBuffer, 100,
+                              "get %%%d", X);
+                dataBus.get(X);
+                break;
+
+            // put
+            case 0x02:
+                std::snprintf(asmBuffer, 100,
+                              "put %%%d", X);
+                dataBus.put(X);
+                break;
+
+            // put
+            case 0x03:
+                std::snprintf(asmBuffer, 100,
+                              "put $%d, $%d, $%d", X, Y, Z);
+                dataBus.putc(X);
+                dataBus.putc(Y);
+                dataBus.putc(Z);
+                break;
+
+            // NOP / illegal instruction
+            case 0xFF:
+                if (X==0x00 && Y==0x00 && Z==0x00) {
+                    std::snprintf(asmBuffer, 100, "nop");
+                } else {
+                    assert(0);  // illegal instruction
+                }
+                break;
+
+            //
+            // Data Bus:  Fetch
+            //
+
+            // movq (%X,%Y), %Z
+            case 0x10:
+                std::snprintf(asmBuffer, 100,
+                              "movq (%%%d, %%%d), %%%d", X, Y, Z);
+                dataBus.fetch<8>(cpuRegister(X)+cpuRegister(Y), Z);
+                break;
+
+            // movq Y(%X), %Z
+            case 0x11:
+                std::snprintf(asmBuffer, 100,
+                              "movq %d(%%%d), %%%d", Ys, X, Z);
+                dataBus.fetch<8>(cpuRegister(X)+Ys, Z);
+                break;
+
+            //
+            // Data Bus:  Store
+            //
+
+            // movq %X, (%Y,%Z)
+            case 0x40:
+                std::snprintf(asmBuffer, 100,
+                              "movq %%%d, (%%%d, %%%d)", X, Y, Z);
+                dataBus.store<8>(X, cpuRegister(Y)+cpuRegister(Z));
+                break;
+
+            // movq %X, Z(%Y)
+            case 0x41:
+                std::snprintf(asmBuffer, 100,
+                              "movq %%%d, %d(%%%d)", X, Zs, Y);
+                dataBus.store<8>(X, cpuRegister(Y)+Zs);
+                break;
+
+            //
+            //  Integer-Arithmetic
+            //
+
+            // addq %X, %Y, %Z
+            case 0x60:
+                std::snprintf(asmBuffer, 100,
+                              "addq  %%%d, %%%d, %%%d", X, Y, Z);
+                alu.add(X, Y, Z);
+                break;
+
+            // addq $X, %Y, %Z
+            case 0x61:
+                std::snprintf(asmBuffer, 100,
+                              "addq  $%d, %%%d, %%%d", Xs, Y, Z);
+                alu.add(uint64_t(Xs), Y, Z);
+                break;
+
+            // subq %X, %Y, %Z
+            case 0x62:
+                std::snprintf(asmBuffer, 100,
+                              "subq  %%%d, %%%d, %%%d", X, Y, Z);
+                alu.sub(X, Y, Z);
+                break;
+
+            // subq $X, %Y, %Z
+            case 0x63:
+                std::snprintf(asmBuffer, 100,
+                              "subq  $%d, %%%d, %%%d", Xs, Y, Z);
+                alu.sub(uint64_t(Xs), Y, Z);
+                break;
+
+            // mulq %X, %Y, %Z
+            case 0x70:
+                std::snprintf(asmBuffer, 100,
+                              "mulq  %%%d, %%%d, %%%d", X, Y, Z);
+                alu.unsignedMul(X, Y, Z);
+                break;
+
+
+            // mulq $X, %Y, %Z
+            case 0x71:
+                std::snprintf(asmBuffer, 100,
+                              "mulq  $%d, %%%d, %%%d", X, Y, Z);
+                alu.unsignedMul(uint64_t(X), Y, Z);
+                break;
+
+            //
+            // Bit-Operations
+            //
+
+            // orq %X, %Y, %Z
+            case 0x80:
+                std::snprintf(asmBuffer, 100,
+                              "orq   %%%d, %%%d, %%%d", X, Y, Z);
+                alu.bitwiseOR(X, Y, Z);
+                break;
+
+            // orq $X, %Y, %Z
+            case 0x81:
+                std::snprintf(asmBuffer, 100,
+                              "orq   $%d, %%%d, %%%d", X, Y, Z);
+                alu.bitwiseOR(uint64_t(X), Y, Z);
+                break;
+
+            // andq %X, %Y, %Z
+            case 0x82:
+                std::snprintf(asmBuffer, 100,
+                              "andq  %%%d, %%%d, %%%d", X, Y, Z);
+                alu.bitwiseAND(X, Y, Z);
+                break;
+
+            // andq $X, %Y, %Z
+            case 0x83:
+                std::snprintf(asmBuffer, 100,
+                              "andq  $%d, %%%d, %%%d", X, Y, Z);
+                alu.bitwiseAND(uint64_t(X), Y, Z);
+                break;
+
+            // shlq %X, %Y, %Z
+            case 0x84:
+                std::snprintf(asmBuffer, 100,
+                              "shlq  %%%d, %%%d, %%%d", X, Y, Z);
+                alu.bitwiseSHL(X, Y, Z);
+                break;
+
+            // shlq $X, %Y, %Z
+            case 0x85:
+                std::snprintf(asmBuffer, 100,
+                              "shlq  $%d, %%%d, %%%d", X, Y, Z);
+                alu.bitwiseSHL(uint64_t(X), Y, Z);
+                break;
+
+            // shrq %X, %Y, %Z
+            case 0x86:
+                std::snprintf(asmBuffer, 100,
+                              "shrq  %%%d, %%%d, %%%d", X, Y, Z);
+                alu.bitwiseSHR(X, Y, Z);
+                break;
+
+            // shrq $X, %Y, %Z
+            case 0x87:
+                std::snprintf(asmBuffer, 100,
+                              "shrq  $%d, %%%d, %%%d", X, Y, Z);
+                alu.bitwiseSHR(uint64_t(X), Y, Z);
+                break;
+
+            // jmp $XYZ
+            case 0x9A:
+                std::snprintf(asmBuffer, 100,
+                              "jmp   @+$%d", XYZs);
+                cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                break;
+
+            // jmp %X, %Y
+            case 0x9B:
+                std::snprintf(asmBuffer, 100,
+                              "jmp   %%%d, %%%d", X, Y);
+                cpuRegister(Y)      = cpuRegister(1) + 4;
+                cpuRegister(1)      = cpuRegister(X);
+                break;
+
+            // jmp %X
+            case 0x9C:
+                std::snprintf(asmBuffer, 100,
+                              "jmp   %%%d", X);
+                --cpuRegister(Y);
+                cpuRegister(1) = cpuRegister(X+cpuRegister(Y));
+                break;
+
+            // jz $XYZ
+            case 0x90:
+                std::snprintf(asmBuffer, 100,
+                              "jz    @+$%d", XYZs);
+                if (alu.zf) {
+                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                }
+                break;
+
+            // jnz $XYZ
+            case 0x91:
+                std::snprintf(asmBuffer, 100,
+                              "jnz   @+$%d", XYZs);
+                if (!alu.zf) {
+                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                }
+                break;
+
+            // jl $XYZ
+            case 0x92:
+                std::snprintf(asmBuffer, 100,
+                              "jl   @+$%d", XYZs);
+                if (alu.sf != alu.of) {
+                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                }
+                break;
+
+            // jge $XYZ
+            case 0x93:
+                std::snprintf(asmBuffer, 100,
+                              "jge   @+$%d", XYZs);
+                if (alu.sf == alu.of) {
+                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                }
+                break;
+
+ 
+            // jle $XYZ
+            case 0x94:
+                std::snprintf(asmBuffer, 100,
+                              "jle   @+$%d", XYZs);
+                if (alu.zf || (alu.sf != alu.of)) {
+                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                }
+                break;
+
+            // jg $XYZ
+            case 0x95:
+                std::snprintf(asmBuffer, 100,
+                              "jg   @+$%d", XYZs);
+                if ((alu.zf==0) && (alu.sf == alu.of)) {
+                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                }
+                break;
+
+            // jb $XYZ
+            case 0x96:
+                std::snprintf(asmBuffer, 100,
+                              "jle   @+$%d", XYZs);
+                if (alu.cf) {
+                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                }
+                break;
+
+            // jnb $XYZ
+            // jae $XYZ
+            case 0x97:
+                std::snprintf(asmBuffer, 100,
+                              "jnb   @+$%d", XYZs);
+                if (!alu.cf) {
+                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                }
+                break;
+
+            // jbe $XYZ
+            case 0x98:
+                std::snprintf(asmBuffer, 100,
+                              "jbe   @+$%d", XYZs);
+                if (alu.cf || alu.zf) {
+                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                }
+                break;
+
+            // ja $XYZ
+            case 0x99:
+                std::snprintf(asmBuffer, 100,
+                              "ja   @+$%d", XYZs);
+                if (!alu.cf && !alu.zf) {
+                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                }
+                break;
+
+            default:
+                std::fprintf(stderr, "Illegal instruction or instruction not "
+                                     "implemented\n");
+                assert(0);
+        }
+
+        if (IP_old==cpuRegister(1)) {
+            cpuRegister(1) += 4;
+        }
+
+        // (D) STORE
+
+
+        IR_asm = std::string(asmBuffer);
+        return run;
+    }
+
+    CpuRegister cpuRegister;
+    ALU         alu;
+    DataBus     dataBus;
+    std::string IR_asm;
+};
+
+struct Computer
+{
+    Computer(const char *filename, bool interactive=true)
+        : cpu(ram, io), cycle(0), interactive(interactive)
+    {
+        if (!load(filename)) {
+            std::fprintf(stderr, "Code in %s corrupted\n", filename);
+            assert(0);
+        }
+    }
+
+    void
+    run()
+    {
+        do {
+            print();
+            ++cycle;
+
+            if (interactive) {
+                std::getchar();
+            }
+        } while (cpu.cycle());
+        print();
+    }
+
+    bool
+    load(const char *filename)
+    {
+        std::ifstream   infile(filename);
+        std::string     line;
+        std::uint64_t   code;
+        std::uint64_t   addr = 0;
+
+        while (std::getline(infile, line))
+        {
+            remove_if(line.begin(), line.end(), isspace);
+            std::istringstream in(line);
+
+            if (! (in >> std::hex >> code)) {
+                return false;
+            }
+
+            addr += 4;
+            ram(addr-1) = 0xFF & (code >> 0*8);
+            ram(addr-2) = 0xFF & (code >> 1*8);
+            ram(addr-3) = 0xFF & (code >> 2*8);
+            ram(addr-4) = 0xFF & (code >> 3*8);
+
+        }
+        return true;
+    }
+
+    void
+    print()
+    {
+        std::printf("CPU cycles done %4d\n\n", cycle);
+        ram.print(0,160);
+        std::printf("....\n\n");
+        ram.print(uint64_t(-1)-79,uint64_t(-1));
+        cpu.print();
+        io.print();
+        std::printf("\n\n");
+    }
+
+    RAM         ram;
+    IO          io;
+    CPU         cpu;
+    int         cycle;
+    bool        interactive;
+};
+
+int
+main(int argc, const char **argv)
+{
+    const char *code;
+    bool       interactive = true;
+
+    if (argc<2) {
+        std::fprintf(stderr, "usage: [-r] %s code-file\n", argv[0]);
+        return 1;
+    }
+    for (int i=1; i<argc; ++i) {
+        if (!strcmp(argv[i], "-r")) {
+            interactive = false;
+        } else {
+            code = argv[i];
+        }
+    }
+
+    Computer    computer(code, interactive);
+
+    computer.run();
+}
