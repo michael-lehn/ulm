@@ -10,20 +10,39 @@
 #include <unordered_map>
 #include <queue>
 #include <vector>
+#include <random>
 
 #include <iostream>
 
 struct RAM
 {
+    RAM()
+    {
+    }
+
     char
     operator()(uint64_t address) const
     {
+        if (!data.count(address)) {
+            std::random_device rd;
+            std::mt19937_64 gen(rd());
+            std::uniform_int_distribution<char> dis;
+
+            data[address] = dis(gen);
+        }
         return data[address];
     }
 
     char &
     operator()(uint64_t address)
     {
+        if (!data.count(address)) {
+            std::random_device rd;
+            std::mt19937_64 gen(rd());
+            std::uniform_int_distribution<char> dis;
+
+            data[address] = dis(gen);
+        }
         return data[address];
     }
 
@@ -42,7 +61,7 @@ struct RAM
             }
             std::printf("\n");
             for (uint64_t i=from; i<=to && (i-1<i || from==0); ++i) {
-                std::printf("%02x ", 0xFF & data[i]);
+                std::printf("%02x ", 0xFF & operator()(i));
             }
             std::printf("\n");
             for (uint64_t i=from; i<=to && (i-1<i || from==0); ++i) {
@@ -95,16 +114,13 @@ struct CpuRegister
 
     void
     print(unsigned char     from,
-          unsigned char     to,
-          const std::string &IR_asmCode) const
+          unsigned char     to) const
     {
 
         for (unsigned char i=from; i<=to; ++i) {
             std::printf("Reg%-2d   0x%016" PRIx64, i, operator()(i));
-            if (i==1) {
-                std::printf("  IP: %" PRIu64, r[1]);
-            } else if (i==2) {
-                std::printf("  IR: %-s", IR_asmCode.c_str());
+            if (i==0) {
+                std::printf(" (Zero register)");
             }
             std::printf("\n");
         }
@@ -166,6 +182,19 @@ struct DataBus
             cpuRegister(reg) = cpuRegister(reg) << 8;
             cpuRegister(reg) = cpuRegister(reg) | (0xFF & ram(address+i));
         }
+    }
+
+    std::uint32_t
+    fetchInstr(uint64_t address)
+    {
+        assert(address % 4 == 0);
+
+        std::uint32_t ir = 0;
+        for (unsigned int i=0; i<4; ++i) {
+            ir = ir  << 8;
+            ir = ir | (0xFF & ram(address+i));
+        }
+        return ir;
     }
 
     template <unsigned int bytes>
@@ -417,15 +446,18 @@ struct CPU
     CPU(RAM &ram, IO &io)
         : alu(cpuRegister), dataBus(ram, cpuRegister, io)
     {
-        cpuRegister(1) = 0;         // Instruction Pointer (IP)
-        cpuRegister(2) = 0;         // Instruction Register (IR)
-        IR_asm         = "halt";
+        ip     = 0;         // Instruction Pointer (IP)
+        ir     = 0;         // Instruction Register (IR)
+        IR_asm = "halt";
     }
 
     void
     print()
     {
-        cpuRegister.print(0,15,IR_asm);
+        std::printf("IP      0x%016" PRIx64 " (= %" PRIu64 ")\n", ip, ip);
+        std::printf("IR:     0x%08" PRIx32 "         (ASM: %-s)\n\n",
+                    ir, IR_asm.c_str());
+        cpuRegister.print(0,15);
         alu.print();
     }
 
@@ -437,10 +469,10 @@ struct CPU
 
 
         // (A) FETCH
-        dataBus.fetch<4, false>(cpuRegister(1), 2);
+        ir = dataBus.fetchInstr(ip);
 
         // (B) DECODE
-        uint32_t instruction = cpuRegister(2);
+        uint32_t instruction = ir;
 
         unsigned char     Z           = instruction       & 0xFF;
         unsigned char     Y           = (instruction>> 8) & 0xFF;
@@ -452,7 +484,7 @@ struct CPU
         signed char Zs = Z;
 
         // (C) EXECUTE
-        uint64_t IP_old = cpuRegister(1);
+        uint64_t IP_old = ip;
 
         uint16_t XY = X;
         XY = (XY<<8) | Y;
@@ -522,6 +554,91 @@ struct CPU
                 dataBus.fetch<8>(cpuRegister(X)+Ys, Z);
                 break;
 
+            // movzlq (%X,%Y), %Z
+            case 0x12:
+                std::snprintf(asmBuffer, 100,
+                              "movzlq (%%%d, %%%d), %%%d", X, Y, Z);
+                dataBus.fetch<4, false>(cpuRegister(X)+cpuRegister(Y), Z);
+                break;
+
+            // movslq (%X,%Y), %Z
+            case 0x13:
+                std::snprintf(asmBuffer, 100,
+                              "movslq (%%%d, %%%d), %%%d", X, Y, Z);
+                dataBus.fetch<4, true>(cpuRegister(X)+cpuRegister(Y), Z);
+                break;
+
+            // movzlq Y(%X), %Z
+            case 0x14:
+                std::snprintf(asmBuffer, 100,
+                              "movzlq %d(%%%d), %%%d", Ys, X, Z);
+                dataBus.fetch<4, false>(cpuRegister(X)+Ys, Z);
+                break;
+
+            // movslq Y(%X), %Z
+            case 0x15:
+                std::snprintf(asmBuffer, 100,
+                              "movslq %d(%%%d), %%%d", Ys, X, Z);
+                dataBus.fetch<4, true>(cpuRegister(X)+Ys, Z);
+                break;
+
+            // movzwq (%X,%Y), %Z
+            case 0x16:
+                std::snprintf(asmBuffer, 100,
+                              "movzwq (%%%d, %%%d), %%%d", X, Y, Z);
+                dataBus.fetch<2, false>(cpuRegister(X)+cpuRegister(Y), Z);
+                break;
+
+            // movswq (%X,%Y), %Z
+            case 0x17:
+                std::snprintf(asmBuffer, 100,
+                              "movswq (%%%d, %%%d), %%%d", X, Y, Z);
+                dataBus.fetch<2, true>(cpuRegister(X)+cpuRegister(Y), Z);
+                break;
+
+            // movzwq Y(%X), %Z
+            case 0x18:
+                std::snprintf(asmBuffer, 100,
+                              "movzwq %d(%%%d), %%%d", Ys, X, Z);
+                dataBus.fetch<2, false>(cpuRegister(X)+Ys, Z);
+                break;
+
+            // movswq Y(%X), %Z
+            case 0x19:
+                std::snprintf(asmBuffer, 100,
+                              "movswq %d(%%%d), %%%d", Ys, X, Z);
+                dataBus.fetch<2, true>(cpuRegister(X)+Ys, Z);
+                break;
+
+            // movzbq (%X,%Y), %Z
+            case 0x1A:
+                std::snprintf(asmBuffer, 100,
+                              "movzbq (%%%d, %%%d), %%%d", X, Y, Z);
+                dataBus.fetch<1, false>(cpuRegister(X)+cpuRegister(Y), Z);
+                break;
+
+            // movsbq (%X,%Y), %Z
+            case 0x1B:
+                std::snprintf(asmBuffer, 100,
+                              "movsbq (%%%d, %%%d), %%%d", X, Y, Z);
+                dataBus.fetch<1, true>(cpuRegister(X)+cpuRegister(Y), Z);
+                break;
+
+            // movzbq Y(%X), %Z
+            case 0x1C:
+                std::snprintf(asmBuffer, 100,
+                              "movzbq %d(%%%d), %%%d", Ys, X, Z);
+                dataBus.fetch<1, false>(cpuRegister(X)+Ys, Z);
+                break;
+
+            // movsbq Y(%X), %Z
+            case 0x1D:
+                std::snprintf(asmBuffer, 100,
+                              "movsbq %d(%%%d), %%%d", Ys, X, Z);
+                dataBus.fetch<1, true>(cpuRegister(X)+Ys, Z);
+                break;
+
+
             //
             // Data Bus:  Store
             //
@@ -539,6 +656,50 @@ struct CPU
                               "movq %%%d, %d(%%%d)", X, Zs, Y);
                 dataBus.store<8>(X, cpuRegister(Y)+Zs);
                 break;
+
+            // movl %X, (%Y,%Z)
+            case 0x42:
+                std::snprintf(asmBuffer, 100,
+                              "movl %%%d, (%%%d, %%%d)", X, Y, Z);
+                dataBus.store<4>(X, cpuRegister(Y)+cpuRegister(Z));
+                break;
+
+            // movl %X, Z(%Y)
+            case 0x43:
+                std::snprintf(asmBuffer, 100,
+                              "movl %%%d, %d(%%%d)", X, Zs, Y);
+                dataBus.store<4>(X, cpuRegister(Y)+Zs);
+                break;
+
+            // movw %X, (%Y,%Z)
+            case 0x44:
+                std::snprintf(asmBuffer, 100,
+                              "movw %%%d, (%%%d, %%%d)", X, Y, Z);
+                dataBus.store<2>(X, cpuRegister(Y)+cpuRegister(Z));
+                break;
+
+            // movw %X, Z(%Y)
+            case 0x45:
+                std::snprintf(asmBuffer, 100,
+                              "movw %%%d, %d(%%%d)", X, Zs, Y);
+                dataBus.store<2>(X, cpuRegister(Y)+Zs);
+                break;
+
+
+            // movb %X, (%Y,%Z)
+            case 0x46:
+                std::snprintf(asmBuffer, 100,
+                              "movb %%%d, (%%%d, %%%d)", X, Y, Z);
+                dataBus.store<1>(X, cpuRegister(Y)+cpuRegister(Z));
+                break;
+
+            // movb %X, Z(%Y)
+            case 0x47:
+                std::snprintf(asmBuffer, 100,
+                              "movb %%%d, %d(%%%d)", X, Zs, Y);
+                dataBus.store<1>(X, cpuRegister(Y)+Zs);
+                break;
+
 
             //
             //  Integer-Arithmetic
@@ -651,15 +812,15 @@ struct CPU
             case 0x9A:
                 std::snprintf(asmBuffer, 100,
                               "jmp   @+$%d", XYZs);
-                cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                ip = int64_t(ip)+ 4*int64_t(XYZs);
                 break;
 
             // jmp %X, %Y
             case 0x9B:
                 std::snprintf(asmBuffer, 100,
                               "jmp   %%%d, %%%d", X, Y);
-                cpuRegister(Y)      = cpuRegister(1) + 4;
-                cpuRegister(1)      = cpuRegister(X);
+                cpuRegister(Y) = ip + 4;
+                ip             = cpuRegister(X);
                 break;
 
             // jmp %X
@@ -667,7 +828,7 @@ struct CPU
                 std::snprintf(asmBuffer, 100,
                               "jmp   %%%d", X);
                 --cpuRegister(Y);
-                cpuRegister(1) = cpuRegister(X+cpuRegister(Y));
+                ip = cpuRegister(X+cpuRegister(Y));
                 break;
 
             // jz $XYZ
@@ -675,7 +836,7 @@ struct CPU
                 std::snprintf(asmBuffer, 100,
                               "jz    @+$%d", XYZs);
                 if (alu.zf) {
-                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                    ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
 
@@ -684,7 +845,7 @@ struct CPU
                 std::snprintf(asmBuffer, 100,
                               "jnz   @+$%d", XYZs);
                 if (!alu.zf) {
-                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                    ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
 
@@ -693,7 +854,7 @@ struct CPU
                 std::snprintf(asmBuffer, 100,
                               "jl   @+$%d", XYZs);
                 if (alu.sf != alu.of) {
-                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                    ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
 
@@ -702,7 +863,7 @@ struct CPU
                 std::snprintf(asmBuffer, 100,
                               "jge   @+$%d", XYZs);
                 if (alu.sf == alu.of) {
-                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                    ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
 
@@ -712,7 +873,7 @@ struct CPU
                 std::snprintf(asmBuffer, 100,
                               "jle   @+$%d", XYZs);
                 if (alu.zf || (alu.sf != alu.of)) {
-                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                    ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
 
@@ -721,7 +882,7 @@ struct CPU
                 std::snprintf(asmBuffer, 100,
                               "jg   @+$%d", XYZs);
                 if ((alu.zf==0) && (alu.sf == alu.of)) {
-                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                    ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
 
@@ -730,7 +891,7 @@ struct CPU
                 std::snprintf(asmBuffer, 100,
                               "jle   @+$%d", XYZs);
                 if (alu.cf) {
-                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                    ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
 
@@ -740,7 +901,7 @@ struct CPU
                 std::snprintf(asmBuffer, 100,
                               "jnb   @+$%d", XYZs);
                 if (!alu.cf) {
-                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                    ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
 
@@ -749,7 +910,7 @@ struct CPU
                 std::snprintf(asmBuffer, 100,
                               "jbe   @+$%d", XYZs);
                 if (alu.cf || alu.zf) {
-                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                    ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
 
@@ -758,7 +919,7 @@ struct CPU
                 std::snprintf(asmBuffer, 100,
                               "ja   @+$%d", XYZs);
                 if (!alu.cf && !alu.zf) {
-                    cpuRegister(1) = int64_t(cpuRegister(1))+ 4*int64_t(XYZs);
+                    ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
 
@@ -768,8 +929,8 @@ struct CPU
                 assert(0);
         }
 
-        if (IP_old==cpuRegister(1)) {
-            cpuRegister(1) += 4;
+        if (IP_old==ip) {
+            ip += 4;
         }
 
         // (D) STORE
@@ -780,6 +941,8 @@ struct CPU
     }
 
     CpuRegister cpuRegister;
+    uint32_t    ir;
+    uint64_t    ip;
     ALU         alu;
     DataBus     dataBus;
     std::string IR_asm;
