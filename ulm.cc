@@ -445,7 +445,7 @@ struct ALU
 struct CPU
 {
     CPU(RAM &ram, IO &io)
-        : alu(cpuRegister), dataBus(ram, cpuRegister, io)
+        : alu(cpuRegister), dataBus(ram, cpuRegister, io), exit(0)
     {
         ip     = 0;         // Instruction Pointer (IP)
         ir     = 0;         // Instruction Register (IR)
@@ -501,8 +501,9 @@ struct CPU
         switch (op) {
             // halt
             case 0x00:
-                std::snprintf(asmBuffer, 100, "halt");
+                std::snprintf(asmBuffer, 100, "halt %%%d", X);
                 run = false;
+                exit = cpuRegister(X);
                 break;
 
             // get
@@ -954,13 +955,14 @@ struct CPU
     uint64_t    ip;
     ALU         alu;
     DataBus     dataBus;
+    int         exit;
     std::string IR_asm;
 };
 
 struct Computer
 {
     Computer(const char *filename, bool interactive=true)
-        : cpu(ram, io), cycle(0), interactive(interactive)
+        : cpu(ram, io), cycle(0), exit(0), interactive(interactive)
     {
         if (!load(filename)) {
             std::fprintf(stderr, "Code in %s corrupted\n", filename);
@@ -1025,6 +1027,7 @@ struct Computer
     IO          io;
     CPU         cpu;
     int         cycle;
+    int         exit;
     bool        interactive;
 };
 
@@ -1049,4 +1052,5 @@ main(int argc, const char **argv)
     Computer    computer(code, interactive);
 
     computer.run();
+    return computer.cpu.exit;
 }
