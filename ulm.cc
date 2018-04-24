@@ -91,7 +91,14 @@ struct CpuRegister
     CpuRegister()
         : zero(0)
     {
-        r[3] = 160;
+        std::random_device rd;
+        std::mt19937_64 gen(rd());
+        std::uniform_int_distribution<uint64_t> dis;
+
+        for (int i=0; i<256; ++i) {
+
+            r[i] = dis(gen);
+        }
     }
 
 
@@ -273,6 +280,7 @@ struct ALU
         uint64_t valueY = cpuRegister(regY);
 
         cpuRegister(regZ) = valueX | valueY;
+        zf = cpuRegister(regZ)==0 ? 1 : 0;
     }
 
     void
@@ -281,6 +289,7 @@ struct ALU
         uint64_t valueY = cpuRegister(regY);
 
         cpuRegister(regZ) = valueX | valueY;
+        zf = cpuRegister(regZ)==0 ? 1 : 0;
     }
 
     void
@@ -290,6 +299,7 @@ struct ALU
         uint64_t valueY = cpuRegister(regY);
 
         cpuRegister(regZ) = valueX & valueY;
+        zf = cpuRegister(regZ)==0 ? 1 : 0;
     }
 
     void
@@ -298,6 +308,7 @@ struct ALU
         uint64_t valueY = cpuRegister(regY);
 
         cpuRegister(regZ) = valueX & valueY;
+        zf = cpuRegister(regZ)==0 ? 1 : 0;
     }
 
     void
@@ -396,8 +407,12 @@ struct ALU
     {
         add(-cpuRegister(regX), regY, regZ);
 
+        uint64_t valueX = cpuRegister(regX);
         uint64_t valueY = cpuRegister(regY);
         uint64_t valueZ = cpuRegister(regZ);
+
+        valueZ = valueY - valueX;
+
         if (valueZ>valueY) {
             cf = 1;
         } else {
@@ -412,6 +427,9 @@ struct ALU
 
         uint64_t valueY = cpuRegister(regY);
         uint64_t valueZ = cpuRegister(regZ);
+
+        valueZ = valueY - valueX;
+
         if (valueZ>valueY) {
             cf = 1;
         } else {
@@ -531,11 +549,7 @@ struct CPU
 
             // NOP / illegal instruction
             case 0xFF:
-                if (X==0x00 && Y==0x00 && Z==0x00) {
-                    std::snprintf(asmBuffer, 100, "nop");
-                } else {
-                    assert(0);  // illegal instruction
-                }
+                std::snprintf(asmBuffer, 100, "nop");
                 break;
 
             // load $XY, %Z
@@ -918,8 +932,11 @@ struct CPU
             // jbe $XYZ
             case 0x98:
                 std::snprintf(asmBuffer, 100,
-                              "jbe   @+$%d", XYZs);
+                              "jbe   @+$%d (false)", XYZs);
+                std::printf("%d %d\n", alu.cf, alu.zf);
                 if (alu.cf || alu.zf) {
+                    std::snprintf(asmBuffer, 100,
+                                  "jbe   @+$%d (true)", XYZs);
                     ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
