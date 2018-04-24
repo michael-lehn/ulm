@@ -396,9 +396,9 @@ struct ALU
     {
         add(-cpuRegister(regX), regY, regZ);
 
-        uint64_t valueX = cpuRegister(regX);
         uint64_t valueY = cpuRegister(regY);
-        if (valueX>valueY) {
+        uint64_t valueZ = cpuRegister(regZ);
+        if (valueZ>valueY) {
             cf = 1;
         } else {
             cf = 0;
@@ -411,7 +411,8 @@ struct ALU
         add(-valueX, regY, regZ);
 
         uint64_t valueY = cpuRegister(regY);
-        if (valueX>valueY) {
+        uint64_t valueZ = cpuRegister(regZ);
+        if (valueZ>valueY) {
             cf = 1;
         } else {
             cf = 0;
@@ -536,6 +537,14 @@ struct CPU
                 }
                 break;
 
+            // load $XY, %Z
+            case 0xF6:
+                std::snprintf(asmBuffer, 100,
+                              "load $%d, %%%d", XY, Z);
+                alu.setWord(XY, Z);
+                break;
+
+
             //
             // Data Bus:  Fetch
             //
@@ -547,11 +556,11 @@ struct CPU
                 dataBus.fetch<8>(cpuRegister(X)+cpuRegister(Y), Z);
                 break;
 
-            // movq Y(%X), %Z
+            // movq Xs(%Y), %Z
             case 0x11:
                 std::snprintf(asmBuffer, 100,
-                              "movq %d(%%%d), %%%d", Ys, X, Z);
-                dataBus.fetch<8>(cpuRegister(X)+Ys, Z);
+                              "movq %d(%%%d), %%%d", Xs, Y, Z);
+                dataBus.fetch<8>(Xs+cpuRegister(Y), Z);
                 break;
 
             // movzlq (%X,%Y), %Z
