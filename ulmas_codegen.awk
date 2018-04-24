@@ -9,7 +9,7 @@ BEGIN {
 
     FS = "[, \t]+"
 
-    op_code["halt"]         = "00"
+    op_code["halt_r"]       = "00"
     op_code["get_r"]        = "01"
     op_code["put_r"]        = "02"
     op_code["put_rrr"]      = "03"
@@ -276,6 +276,19 @@ NF==3 && $1~inst && $2~imm && $3~reg {
     next
 }
 
+#
+#  1-address:   OP  R
+#
+NF==2 && $1~inst && $2~reg {
+    op = $1 "_r"
+    if (length(op_code[op])) {
+        line = code3(op_code[op], reg_code($2), imm_code(0), imm_code(0))
+        dump(line)
+    } else {
+        illegal($0)
+    }
+    next
+}
 
 #
 #  1-address:   OP  I
