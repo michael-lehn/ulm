@@ -858,8 +858,10 @@ struct CPU
             // jz $XYZ
             case 0x90:
                 std::snprintf(asmBuffer, 100,
-                              "jz    @+$%d", XYZs);
+                              "jz    @+$%d (false)", XYZs);
                 if (alu.zf) {
+                    std::snprintf(asmBuffer, 100,
+                                  "jz    @+$%d (true)", XYZs);
                     ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
@@ -867,8 +869,10 @@ struct CPU
             // jnz $XYZ
             case 0x91:
                 std::snprintf(asmBuffer, 100,
-                              "jnz   @+$%d", XYZs);
+                              "jnz   @+$%d (false)", XYZs);
                 if (!alu.zf) {
+                    std::snprintf(asmBuffer, 100,
+                                  "jnz   @+$%d (true)", XYZs);
                     ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
@@ -876,8 +880,10 @@ struct CPU
             // jl $XYZ
             case 0x92:
                 std::snprintf(asmBuffer, 100,
-                              "jl   @+$%d", XYZs);
+                              "jl   @+$%d (false)", XYZs);
                 if (alu.sf != alu.of) {
+                    std::snprintf(asmBuffer, 100,
+                                  "jl   @+$%d (true)", XYZs);
                     ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
@@ -885,8 +891,10 @@ struct CPU
             // jge $XYZ
             case 0x93:
                 std::snprintf(asmBuffer, 100,
-                              "jge   @+$%d", XYZs);
+                              "jge   @+$%d (false)", XYZs);
                 if (alu.sf == alu.of) {
+                    std::snprintf(asmBuffer, 100,
+                                  "jge   @+$%d (true)", XYZs);
                     ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
@@ -895,8 +903,10 @@ struct CPU
             // jle $XYZ
             case 0x94:
                 std::snprintf(asmBuffer, 100,
-                              "jle   @+$%d", XYZs);
+                              "jle   @+$%d (false)", XYZs);
                 if (alu.zf || (alu.sf != alu.of)) {
+                    std::snprintf(asmBuffer, 100,
+                                  "jle   @+$%d (true)", XYZs);
                     ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
@@ -904,8 +914,10 @@ struct CPU
             // jg $XYZ
             case 0x95:
                 std::snprintf(asmBuffer, 100,
-                              "jg   @+$%d", XYZs);
+                              "jg   @+$%d (false)", XYZs);
                 if ((alu.zf==0) && (alu.sf == alu.of)) {
+                    std::snprintf(asmBuffer, 100,
+                                  "jg   @+$%d (true)", XYZs);
                     ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
@@ -913,8 +925,10 @@ struct CPU
             // jb $XYZ
             case 0x96:
                 std::snprintf(asmBuffer, 100,
-                              "jle   @+$%d", XYZs);
+                              "jle   @+$%d (false)", XYZs);
                 if (alu.cf) {
+                    std::snprintf(asmBuffer, 100,
+                                  "jle   @+$%d (true)", XYZs);
                     ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
@@ -923,8 +937,10 @@ struct CPU
             // jae $XYZ
             case 0x97:
                 std::snprintf(asmBuffer, 100,
-                              "jnb   @+$%d", XYZs);
+                              "jnb   @+$%d (false)", XYZs);
                 if (!alu.cf) {
+                    std::snprintf(asmBuffer, 100,
+                                  "jnb   @+$%d (true)", XYZs);
                     ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
@@ -944,8 +960,10 @@ struct CPU
             // ja $XYZ
             case 0x99:
                 std::snprintf(asmBuffer, 100,
-                              "ja   @+$%d", XYZs);
+                              "ja   @+$%d (false)", XYZs);
                 if (!alu.cf && !alu.zf) {
+                    std::snprintf(asmBuffer, 100,
+                                  "ja   @+$%d (true)", XYZs);
                     ip = int64_t(ip)+ 4*int64_t(XYZs);
                 }
                 break;
@@ -1019,13 +1037,15 @@ struct Computer
 
             size_t len = in.str().length();
 
+            if (len==0) {
+                continue;
+            }
+
             if (len % 2) {
-                printf("hello1\n");
                 return false;
             }
 
             if (! (in >> std::hex >> code)) {
-                printf("hello2\n");
                 return false;
             }
 
