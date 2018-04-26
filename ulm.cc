@@ -1079,5 +1079,7 @@ main(int argc, const char **argv)
     Computer    computer(code, interactive);
 
     computer.run();
+    std::printf("ULM was halted with exit code %d (=0x%02X)\n",
+                computer.cpu.exit, computer.cpu.exit);
     return computer.cpu.exit;
 }
