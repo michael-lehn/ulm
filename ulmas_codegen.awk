@@ -186,8 +186,8 @@ function reg_vec_code (reg_vec)
 
 function dump(line)
 {
-    gsub(/^[ ]*/, "", $0)
-    print line "    # " sprintf("%04X", code_line_nu) " :  " $0
+    gsub(" ", "\t", $0)
+    print line "    # " sprintf("%04X", code_line_nu) " :\t" $0
     code_line_nu += 4
 }
 
@@ -196,14 +196,34 @@ function illegal(line)
     print "illegal instruction:> " line
 }
 
-/^\s*$/ {
-    next;
-}
-
+# remove leading spaces
 /^\s+/ {
     gsub(/^\s*/, "", $0)
 }
 
+# remove trailing spaces
+/\s+$/ {
+    gsub(/\s+$/, "", $0)
+}
+
+# remove empty lines
+/^\s*$/ {
+    next;
+}
+
+# replace spaces after instruction with comma
+# remove all spaces
+NF>1 && $1~inst {
+#   print "before: ", $0
+    gsub($1, $1 ";", $0)
+    gsub(/\s/, "", $0)
+    gsub(/;/, " ", $0)
+    gsub(/,/, ", ", $0)
+#    print "after: ", $0
+#    for (i=1; i<=NF; ++i) {
+#        printf("%d: >%s<, mem1: %d, mem2: %d\n", i, $i, $i~mem1, $i~mem2)
+#    }
+}
 
 #
 #  3-address:   OP M, M,  R

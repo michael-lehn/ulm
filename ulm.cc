@@ -1011,18 +1011,28 @@ struct Computer
 
         while (std::getline(infile, line))
         {
-            remove_if(line.begin(), line.end(), isspace);
+            line.erase(find(line.begin(), line.end(), '#'),
+                       line.end());
+            line.erase(remove_if(line.begin(), line.end(), isspace),
+                       line.end());
             std::istringstream in(line);
 
-            if (! (in >> std::hex >> code)) {
+            size_t len = in.str().length();
+
+            if (len % 2) {
+                printf("hello1\n");
                 return false;
             }
 
-            addr += 4;
-            ram(addr-1) = 0xFF & (code >> 0*8);
-            ram(addr-2) = 0xFF & (code >> 1*8);
-            ram(addr-3) = 0xFF & (code >> 2*8);
-            ram(addr-4) = 0xFF & (code >> 3*8);
+            if (! (in >> std::hex >> code)) {
+                printf("hello2\n");
+                return false;
+            }
+
+            addr += len/2;
+            for (size_t i=0; i<len/2; ++i) {
+                ram(addr-i-1) = 0xFF & (code >> i*8);
+            }
 
         }
         return true;
