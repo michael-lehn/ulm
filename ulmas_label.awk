@@ -134,7 +134,7 @@ function data_append_quad(x) {
     next
 }
 
-/^\s*[[:alpha:]][[:alnum:]]*:/ {
+/^\s*[[:alpha:]]([[:alnum:]]|[_])*:/ {
     gsub("[. :]","",$0)
     if (read_text) {
         if (text_label[$0]) {

@@ -511,10 +511,9 @@ struct CPU
         uint32_t XYZ = XY;
         XYZ = (XYZ<<8) | Z;
 
-        int32_t XYZs = XY;
+        int32_t XYZs = (int16_t)XY;
         XYZs = (XYZs<<8) | Z;
 
-        XYZs = Zs;
 
         switch (op) {
             // halt
@@ -835,7 +834,7 @@ struct CPU
             // jmp $XYZ
             case 0x9A:
                 std::snprintf(asmBuffer, 100,
-                              "jmp   @+$%d", XYZs);
+                              "jmp   @+$%" PRId32, XYZs);
                 ip = int64_t(ip)+ 4*int64_t(XYZs);
                 break;
 
