@@ -44,6 +44,10 @@ $1 == ".endm" {
     next
 }
 
+function byLength(i1,v1,i2,v2) {
+    return length(i2)-length(i1)
+}
+
 function format(line)
 {
     print line
@@ -52,11 +56,14 @@ function format(line)
 function expand_equ(line)
 {
     found = 0
+    n=asorti(equ, s, "byLength")
     do {
-       for (key in equ) {
-            found = gsub(key, equ[key], line)
+        for (i=1; i<=n; ++i) {
+            new = gensub("([ %$])" s[i], "\\1" equ[s[i]], "g", line)
+            found = (new!=line) ? 1 : 0
+            line = new
         }
-    } while (found);
+    } while (found)
     return line
 }
 
