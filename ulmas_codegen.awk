@@ -1,4 +1,5 @@
 BEGIN {
+    data    = "^[a-fA-F0-9 ]+$"
     inst    = "^[[:space:]]*[[:alpha:]][[:alnum:]]*$"
     reg     = "^[%][[:digit:]]+$"
     mem1    = "^[(][%][[:digit:]]+$"
@@ -209,6 +210,12 @@ function illegal(line)
 # remove empty lines
 /^\s*$/ {
     next;
+}
+
+# skip data
+$0 ~data {
+    print $0, "# data"
+    next
 }
 
 # replace spaces after instruction with comma
