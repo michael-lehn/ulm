@@ -11,6 +11,35 @@ BEGIN {
     read_text = 0
 
     error = 0
+
+    _ord_init()
+}
+
+function _ord_init(    low, high, i, t)
+{
+    low = sprintf("%c", 7) # BEL is ascii 7
+    if (low == "\a") {    # regular ascii
+        low = 0
+        high = 127
+    } else if (sprintf("%c", 128 + 7) == "\a") {
+        # ascii, mark parity
+        low = 128
+        high = 255
+    } else {        # ebcdic(!)
+        low = 0
+        high = 255
+    }
+
+    for (i = low; i <= high; i++) {
+        t = sprintf("%c", i)
+        _ord_[t] = i
+    }
+}
+
+function ord(str, pos)
+{
+    c = substr(str, pos, 1)
+    return _ord_[c]
 }
 
 function data_align(x) {
@@ -73,6 +102,26 @@ function data_append_quad(x) {
 /^\s*\.align/ {
     data_align(strtonum($2))
 }
+
+/^\s*\.ascii/ {
+    if (read_data) {
+        if (NF==0) {
+            data_append_byte("0")
+        } else {
+            gsub("\"", "", $2)
+            for (i=0; i<length($2); ++i) {
+                data_append_byte(ord($2, i+1))
+            }
+            data_append_byte("0")
+        }
+    } else {
+        print "error in line " NR ": .quad not in data section"
+        error = 1
+        exit 1
+    }
+    next
+}
+
 
 /^\s*\.byte/ {
     if (read_data) {

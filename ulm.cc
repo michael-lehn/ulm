@@ -1028,15 +1028,34 @@ struct Computer
 
         while (std::getline(infile, line))
         {
+            // remove comments
             line.erase(find(line.begin(), line.end(), '#'),
                        line.end());
+            // remove any white space
             line.erase(remove_if(line.begin(), line.end(), isspace),
                        line.end());
+
+            // parse by streaming the string
             std::istringstream in(line);
 
-            size_t len = in.str().length();
+            std::size_t len = in.str().length();
+            std::size_t bss = in.str().find("BSS");
+            if (bss!=std::string::npos) {
+                in.ignore(bss+3);
+                in >> bss;
+                for (size_t i=0; i<bss; ++i) {
+                    ram(addr+i) = 0;
+                }
+                addr += bss;
+                break;
+            }
 
-            if (len==0) {
+            // skip labels
+            if (in.str().find(":")!=std::string::npos) {
+                continue;
+            }
+
+            if (len==1) {
                 continue;
             }
 
@@ -1049,7 +1068,7 @@ struct Computer
             }
 
             addr += len/2;
-            for (size_t i=0; i<len/2; ++i) {
+            for (std::size_t i=0; i<len/2; ++i) {
                 ram(addr-i-1) = 0xFF & (code >> i*8);
             }
 
