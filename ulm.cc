@@ -1025,9 +1025,12 @@ struct Computer
         std::string     line;
         std::uint64_t   code;
         std::uint64_t   addr = 0;
+        std::uint64_t   lno = 0;
 
         while (std::getline(infile, line))
         {
+            ++lno;
+
             // remove comments
             line.erase(find(line.begin(), line.end(), '#'),
                        line.end());
@@ -1055,15 +1058,18 @@ struct Computer
                 continue;
             }
 
-            if (len==1) {
+            // skip empty lines
+            if (len==0) {
                 continue;
             }
 
-            if (len % 2) {
-                return false;
-            }
+            //if (len % 2) {
+            //    return false;
+            //}
 
             if (! (in >> std::hex >> code)) {
+                std::cerr << "len = " << len << std::endl;
+                std::cerr << "Line " << lno << ":" << in.str() << std::endl;
                 return false;
             }
 

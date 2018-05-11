@@ -4,6 +4,7 @@ BEGIN {
     reg     = "^[%][[:digit:]]+$"
     mem1    = "^[(][%][[:digit:]]+$"
     mem2    = "^[%][[:digit:]]+[)]$"
+    imem    = "^[-]?[[:digit:]]*[(][%][[:digit:]]+[)]$"
     mem_rr  = "^[(][^,]+,[^,]+[)][,]?$"
     imm     = "^[$][-]?[[:digit:]]+[,]?"
     reg_vec = "^[%][(][^,]+,[^,]+[)][,]?$"
@@ -18,19 +19,28 @@ BEGIN {
     op_code["load_ir"]      = "F6"
 
     op_code["movq_mmr"]     = "10"
-    op_code["movq_imr"]     = "11"  # obsolete
+    op_code["movq_imr"]     = "11"
     op_code["movzlq_mmr"]   = "12"
     op_code["movslq_mmr"]   = "13"
+    op_code["movzlq_imr"]   = "14"
+    op_code["movslq_imr"]   = "15"
     op_code["movzwq_mmr"]   = "16"
     op_code["movswq_mmr"]   = "17"
+    op_code["movzwq_imr"]   = "18"
+    op_code["movswq_imr"]   = "19"
     op_code["movzbq_mmr"]   = "1A"
     op_code["movsbq_mmr"]   = "1B"
+    op_code["movzbq_imr"]   = "1C"
+    op_code["movsbq_imr"]   = "1D"
 
     op_code["movq_rmm"]     = "40"
     op_code["movq_rim"]     = "41"
     op_code["movl_rmm"]     = "42"
+    op_code["movl_rim"]     = "43"
     op_code["movw_rmm"]     = "44"
+    op_code["movw_rim"]     = "45"
     op_code["movb_rmm"]     = "46"
+    op_code["movb_rim"]     = "47"
 
     op_code["addq_rrr"]     = "60"
     op_code["addq_irr"]     = "61"
@@ -286,6 +296,38 @@ NF==4 && $1~inst && $2~imm && $3~reg && $4~reg {
     } else {
         illegal($0)
     }
+    next
+}
+
+#
+#  3-address:   OP R, I,  M
+#
+NF==3 && $1~inst && $2~reg && $3~imem {
+    split($3, a, "[()]")
+    op = $1 "_rim"
+    if (length(op_code[op])) {
+        line = code3(op_code[op], reg_code($2), imm_code(a[1]), mem_code(a[2]))
+        dump(line)
+    } else {
+        illegal($0)
+    }
+    #    print ">" $1 ", ", $2, ", ", a[1], ":", a[2]
+    next
+}
+
+#
+#  3-address:   OP I,  M,   R
+#
+NF==3 && $1~inst && $2~imem && $3~reg {
+    split($2, a, "[()]")
+    op = $1 "_imr"
+    if (length(op_code[op])) {
+        line = code3(op_code[op], imm_code(a[1]), mem_code(a[2]), reg_code($3))
+        dump(line)
+    } else {
+        illegal($0)
+    }
+    #    print ">" $1 ", ", $2, ", ", a[1], ":", a[2]
     next
 }
 

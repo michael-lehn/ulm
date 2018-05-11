@@ -3,19 +3,21 @@ function byLength(i1,v1,i2,v2) {
 }
 
 BEGIN {
-    num_text_lines = 0
+    num_instr      = 0
     num_data_bytes = 0
-    ds_align       = -1
 
-    read_data = 0
-    read_text = 0
+    read_data      = 0
+    read_text      = 0
+
+    align_data     = 1
+    globl          = 0
 
     error = 0
 
     _ord_init()
 }
 
-function _ord_init(    low, high, i, t)
+function _ord_init(low, high, i, t)
 {
     low = sprintf("%c", 7) # BEL is ascii 7
     if (low == "\a") {    # regular ascii
@@ -42,41 +44,46 @@ function ord(str, pos)
     return _ord_[c]
 }
 
-function data_align(x) {
-    while (num_data_bytes % x) {
-        data_append_byte(-1)
+function data_write_byte(value) {
+    data[num_data_bytes++] = sprintf("%02X", and(value, 0xFF))
+}
+
+function data_align(align) {
+    while (num_data_bytes % align) {
+        data_write_byte(255)
     }
-    if (ds_align==-1) {
-        ds_align = x
+}
+
+function data_add(value, size,      i) {
+    for (i in open_data_label) {
+        data_label[i] = num_data_bytes
+        if (open_data_label[i]) {
+            old = data_globl[num_data_bytes]
+            data_globl[num_data_bytes] = i " " old
+        }
+        delete open_data_label[i]
     }
+
+    while (--size >= 0) {
+        data_write_byte(rshift(value, 8*size))
+    }
+    align_data = 1
 }
 
-function data_append_byte(x) {
-    data_align(1)   # set ds_align to 1 if not previously set by '.align'
-    data[num_data_bytes++] = sprintf("%02X", and(x, 0xFF))
-}
-
-function data_append_word(x) {
-    data_append_byte(and(rshift(x, 8), 0xFF))
-    data_append_byte(and(rshift(x, 0), 0xFF))
-}
-
-function data_append_long(x) {
-    data_append_byte(and(rshift(x, 24), 0xFF))
-    data_append_byte(and(rshift(x, 16), 0xFF))
-    data_append_byte(and(rshift(x,  8), 0xFF))
-    data_append_byte(and(rshift(x,  0), 0xFF))
-}
-
-function data_append_quad(x) {
-    data_append_byte(and(rshift(x, 56), 0xFF))
-    data_append_byte(and(rshift(x, 48), 0xFF))
-    data_append_byte(and(rshift(x, 40), 0xFF))
-    data_append_byte(and(rshift(x, 32), 0xFF))
-    data_append_byte(and(rshift(x, 24), 0xFF))
-    data_append_byte(and(rshift(x, 16), 0xFF))
-    data_append_byte(and(rshift(x,  8), 0xFF))
-    data_append_byte(and(rshift(x,  0), 0xFF))
+function bss_add(size, align) {
+    if (num_bss_bytes % align) {
+        print "bss align: ", align - num_bss_bytes % align
+        num_bss_bytes += align - num_bss_bytes % align
+    }
+    for (i in open_data_label) {
+        bss_label[i]  = num_bss_bytes
+        if (open_data_label[i]) {
+            old = data_globl[num_bss_bytes]
+            data_globl[num_bss_bytes] = i " " old
+        }
+        delete open_data_label[i]
+    }
+    num_bss_bytes += size
 }
 
 /\s*#.*$/ {
@@ -103,83 +110,91 @@ function data_append_quad(x) {
     data_align(strtonum($2))
 }
 
+/^\s*\.comm/ {
+    bss_add($2, $3)
+}
+
 /^\s*\.ascii/ {
-    if (read_data) {
-        if (NF==0) {
-            data_append_byte("0")
-        } else {
-            gsub("\"", "", $2)
-            for (i=0; i<length($2); ++i) {
-                data_append_byte(ord($2, i+1))
-            }
-            data_append_byte("0")
-        }
-    } else {
-        print "error in line " NR ": .quad not in data section"
+    if (! read_data) {
+        print "error in line " NR ": .ascii not in data section"
         error = 1
         exit 1
+    }
+    if (NF==0) {
+        print "expected init value"
+        error = 1
+        exit 1
+    }
+    gsub("\"", "", $2)
+    for (i=0; i<length($2); ++i) {
+        data_add(ord($2, i+1), 1)
     }
     next
 }
 
 
 /^\s*\.byte/ {
-    if (read_data) {
-        if (NF==0) {
-            data_append_byte(0)
-        } else {
-            data_append_byte(strtonum($2))
-        }
-    } else {
+    if (! read_data) {
         print "error in line " NR ": .quad not in data section"
         error = 1
         exit 1
     }
+    if (NF==0) {
+        print "expected init value"
+        error = 1
+        exit 1
+    }
+    data_add(strtonum($2), 1)
     next
 }
 
 /^\s*\.word/ {
-    if (read_data) {
-        if (NF==0) {
-            data_append_word(0)
-        } else {
-            data_append_word(strtonum($2))
-        }
-    } else {
+    if (! read_data) {
         print "error in line " NR ": .quad not in data section"
         error = 1
         exit 1
     }
+    if (NF==0) {
+        print "expected init value"
+        error = 1
+        exit 1
+    }
+    data_add(strtonum($2), 2)
     next
 }
 
 /^\s*\.long/ {
-    if (read_data) {
-        if (NF==0) {
-            data_append_long(0)
-        } else {
-            data_append_long(strtonum($2))
-        }
-    } else {
+    if (! read_data) {
         print "error in line " NR ": .quad not in data section"
         error = 1
         exit 1
     }
+    if (NF==0) {
+        print "expected init value"
+        error = 1
+        exit 1
+    }
+    data_add(strtonum($2), 4)
     next
 }
 
 /^\s*\.quad/ {
-    if (read_data) {
-        if (NF==0) {
-            data_append_quad(0)
-        } else {
-            data_append_quad(strtonum($2))
-        }
-    } else {
+    if (! read_data) {
         print "error in line " NR ": .quad not in data section"
         error = 1
         exit 1
     }
+    if (NF==0) {
+        print "expected init value"
+        error = 1
+        exit 1
+    }
+    data_add(strtonum($2), 8)
+    next
+}
+
+/^\s*\.globl/ {
+    globl = 1
     next
 }
 
@@ -191,29 +206,92 @@ function data_append_quad(x) {
             error = 1
             exit 1
         }
-        text_label[$0] = num_text_lines*4
+        text_label[$0]        = 4*num_instr
+        if (globl) {
+            old = text_globl[num_instr]
+            text_globl[num_instr] = $0 " " old
+        }
     }
     if (read_data) {
-        data_label[$0] = num_data_bytes
+        if (data_label[$0]) {
+            print "error in line " NR ": redefinition of label " $0
+            error = 1
+            exit 1
+        }
+        open_data_label[$0] = globl
+
+    }
+    if (globl) {
+        globl = 0
     }
     next
 }
 
 read_text {
-    text[num_text_lines++] = $0
+    text[num_instr++] = $0
     next
+}
+
+function write_data_init(start_addr,     i) {
+    for (i=0; i<4; ++i) {
+        data_rec[i] = ""
+    }
+    data_addr = start_addr
+    data_set  = 0
+}
+
+function write_data_set(ds_offset, str) {
+
+    data_rec[ds_offset % 4] = sprintf("%-3s", str)
+    data_set  = 1
+
+}
+
+function write_data_flush(with_addr,        i) {
+    if (! data_set) {
+        return
+    }
+
+    printf("    ")
+    for (i=0; i<4; ++i) {
+        printf("%-3s", data_rec[i])
+    }
+    if (data_rec[0] != "") {
+        addr = data_addr + ds_offset
+        addr = addr - addr % 4
+        printf data_line sprintf("   #- %04X", addr)
+    }
+    print ""
+    data_set = 0
 }
 
 END {
     if (!error) {
-#       print "-- TEXT_SECTION --"
-        ts = 4*num_text_lines
+        if (num_instr % 2) {
+            text[num_instr++] = "    nop"
+        }
 
-        data_align(1)
-        ds = ds_align*int((ts + ds_align-1)/ds_align)
-        padding = ds - ts
+        ds     = num_instr*4
+        for (i in data_label) {
+            data_label[i] += ds
+        }
 
-        for (i=0; i<num_text_lines; ++i) {
+        bss   = ds + num_data_bytes
+        bss  += (bss % 8) ?  8 - bss % 8 : 0
+        for (i in bss_label) {
+            bss_label[i] += bss
+            data_label[i] = bss_label[i]
+        }
+
+        print "    #-- TEXT_SECTION --------"
+
+        for (i=0; i<num_instr; ++i) {
+            if (i in text_globl) {
+                split(text_globl[i], label, " ")
+                for (l in label) {
+                    print label[l], ":"
+                }
+            }
             instr =  gensub(/(^\s*[a-z]*\s*)(.*)$/, "\\1", "g", text[i])
             param =  gensub(/(^\s*[a-z]*\s*)(.*)$/, "\\2", "g", text[i])
             n=asorti(text_label, s, "byLength")
@@ -227,7 +305,7 @@ END {
             }
             n=asorti(data_label, s, "byLength")
             for (k=1; k<=n; ++k) {
-                addr_abs = sprintf("0x%02X", data_label[s[k]]+ds)
+                addr_abs = sprintf("0x%02X", data_label[s[k]])
                 #addr_rel = sprintf("0x%04X", data_label[s[k]]+ds-4*i)
                 gsub("[$]" s[k], "$" addr_abs, param)
                 #gsub(s[k], addr_rel, param)
@@ -235,15 +313,35 @@ END {
             print instr param
         }
 
-#       print "-- DATA_SECTION --"
-        if (padding) {
-            print "FF FF FF FF    #=" sprintf("%04X", ds-padding)
-        }
+        print "    #-- DATA_SECTION --------"
+        write_data_init(ds)
         for (i=0; i<num_data_bytes; ++i) {
-            printf("%-3s", data[i])
-            if (i % 4==3) {
-                print "   #-" sprintf("%04X", ds+i-3)
+            if (i in data_globl) {
+                write_data_flush(1)
+                write_data_init(ds+i)
+                split(data_globl[i], label, " ")
+                for (l in label) {
+                    print label[l], ":"
+                }
             }
+
+            if (i % 4 == 0) {
+                write_data_init(ds+i)
+            }
+            write_data_set(i, data[i])
+            if (i % 4 == 3) {
+                write_data_flush(1)
+            }
+
         }
+        write_data_flush(1)
+        print "    #-- DATA_SECTION (BSS) --"
+        if (num_bss_bytes) {
+            print "BSS ", num_bss_bytes
+        }
+        for (i in bss_label) {
+            print i ": "  sprintf("0x%016X", bss_label[i])
+        }
+        print ""
     }
 }
